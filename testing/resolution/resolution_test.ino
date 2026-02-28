@@ -121,6 +121,11 @@ bool readComplete = false; // Checks if reading is complete before moving stages
 volatile int xEncoderStatus  = 0;      // [binary] Past and Current A&B values of the encoder  (Declared 'volatile', since it is updated in a function called by interrupts)
 volatile long xEncoderCounts = 0;
 
+#define NUM_POSITION 30 // [YOUR LENGTH] / 2 mm
+int raw_position[NUM_POSITION];
+int position_index = 15; // starting at 1 in case there's some slight noise in opposite direction
+// Will be used for position tracking with filter later on
+
 struct AxisStatus { // units are in microns
   volatile int piezoPosition;
   volatile int oldPiezoPosition;
@@ -179,21 +184,10 @@ int currentCoordinateIndex = 0; // Ignoring first one
 
 void display_position(){
   // TRACKING X POSITION
-  // axes[0].newPiezoPosition = position_read(X_CS, X_CLK, X_DO);
   axes[0].newPiezoPosition = position_read(X_CS, X_CLK, X_DO);
-  axes[1].newPiezoPosition = position_read(X_CS, X_CLK, X_DO);
-  axes[0].newPiezoPosition = lp.filt(axes[0].newPiezoPosition);
-  // axes[0].newPiezoPosition = axes[0].newPiezoPosition * 0.9459754389;
-  axes[0].piezoPosition = track_position(axes[0].piezoPosition, axes[0].newPiezoPosition, axes[0].oldPiezoPosition, 0, true, axes[0].offsetVal);
-  // axes[0].piezoPosition = lp.filt(axes[0].piezoPosition);
-  axes[1].piezoPosition = track_position(axes[1].piezoPosition, axes[1].newPiezoPosition, axes[1].oldPiezoPosition, 0, true, axes[0].offsetVal);
-  // Serial.print(", Current pos: ");
-  // Serial.println(axes[0].piezoPosition);
+  position_index = track_raw_position(axes[0].newPiezoPosition, axes[0].oldPiezoPosition, position_index);
+  int true_position = raw_position[position_index] + 4096*(position_index-15);
   axes[0].oldPiezoPosition = axes[0].newPiezoPosition;
-  axes[1].oldPiezoPosition = axes[1].newPiezoPosition;
-  // Serial.print(", Old pos: ");
-  // Serial.println(axes[0].oldPiezoPosition);
-  // delay(2000);
 
   // // TRACKING Y POSITION
   // axes[1].newPiezoPosition = position_read(Y_CS, Y_CLK, Y_DO);
@@ -204,30 +198,15 @@ void display_position(){
   // // Serial.print(";");
   // // Serial.print("Y");
 
-  float xn = axes[0].piezoPosition;
-  float yn = axes[1].piezoPosition;
-
   // Compute the filtered signal
-  // float yn = lp.filt(xn);
+  axes[0].piezoPosition = lp.filt(true_position);
 
   // Output
-  // Serial.print(millis());
-  // Serial.print(", ");
-  // Serial.print(xn *  0.48828125 * 0.9459754389);
-  Serial.print(", Filtered pos: ");
-  Serial.print(xn * 0.9459754389);
-  Serial.print(", Unfiltered pos: ");
-  Serial.println(yn * 0.9459754389);
-
-  // // Serial.print(", ");
-  // // Serial.print(yn);
-  // Serial.print(", ");
-  // Serial.println(xEncoderCounts);
-
-  // Serial.print(millis());
-  // Serial.print(", ");
-  // // Serial.println(axes[1].piezoPosition * countsToMicrons * 0.9472702863);  
-  // Serial.println(axes[1].piezoPosition);  
+  Serial.print(millis());
+  Serial.print(", ");
+  Serial.print(axes[0].piezoPosition * 0.9459754389);
+  Serial.print(", ");
+  Serial.println(xEncoderCounts);
 }
 
 uint16_t read_bits(uint8_t dataPin, uint8_t clockPin, uint8_t bitOrder, uint8_t numBits) {
@@ -291,6 +270,20 @@ int track_position(int current_pos, int new_pos, int old_pos, int index, bool of
   }
   return current_pos;
 }
+int track_raw_position(int new_pos, int old_pos, int pos_index){
+  int diff = new_pos - old_pos;
+  int max_float_limit = 4096;
+  if (abs(diff) > max_float_limit / 4) {  // wrap around occurred
+    if (diff > 0) {           
+      pos_index --;
+    } else {  
+      pos_index ++;
+    }
+  } 
+  raw_position[pos_index] = new_pos;
+
+  return pos_index;
+}
 void updateXPosition() {
   // isr_start_time = micros();
   xEncoderStatus <<= 1;   
@@ -313,7 +306,7 @@ void updateXPosition() {
 }
 
 //// CALIBRATION ////
-const int calibrateRange = 2;
+const int calibrateRange = 5;
 // unsigned long startTime         = 0;
 const unsigned long duration = 2000;       // 2 seconds in milliseconds
 const int startingFrequencyX = -700;
@@ -337,7 +330,7 @@ void calibrateAxis(int axisIndex) {
       if (axisIndex == 0) {  // X-Axis
         write_freqs(0, startingFrequencyY);
         axes[0].offsetVal = axis.piezoPosition;
-        // Serial.print("Offset val for x is: ");
+        // Serial.print("Offset is: ");
         // Serial.println(axes[0].offsetVal);
       } else if (axisIndex == 1) {  // Y-Axis
         write_freqs(0, 0);
@@ -345,8 +338,6 @@ void calibrateAxis(int axisIndex) {
       }
       axis.calibrationDone = true;
       write_freqs(0, 0);  // Temporarily stops movements - calibration is done
-      // Serial.print("Finished calibrating axis ");
-      // Serial.println(axisIndex);
     }
   } else {
     axis.startTime = 0;
@@ -372,9 +363,9 @@ const long MIN_VEL_COMP_TIME = 10000;                        // [microseconds] M
 // float KP = 1;                                                // [Volt / encoder counts] P-Gain
 // float KD = 0.0005;                                           // [Volt * seconds / encoder counts] D-Gain
 // float KI = 0;                                                // [Volt / (encoder counts * seconds)] I-Gain
-float KP = 4;                                                // [Volt / encoder counts] P-Gain
-float KD = 1;                                           // [Volt * seconds / encoder counts] D-Gain
-float KI = 0.01;                                                // [Volt / (encoder counts * seconds)] I-Gain
+float KP = 1;                                                // [Volt / encoder counts] P-Gain
+float KD = 0;                                           // [Volt * seconds / encoder counts] D-Gain
+float KI = 0;                                                // [Volt / (encoder counts * seconds)] I-Gain
 
 bool closed_loop_positioning(int targetX, int targetY){
   int limit = 500;
@@ -413,20 +404,12 @@ bool closed_loop_positioning(int targetX, int targetY){
   else if ((desiredFrequencyY >= 0) && (desiredFrequencyY <= 10)) desiredFrequencyY = 1;
   else if ((desiredFrequencyY <= 0) && (desiredFrequencyY >= -10)) desiredFrequencyY = -1;
 
-  // Serial.println(desiredFrequencyX);
-
   write_freqs(-desiredFrequencyX, desiredFrequencyY);
 
-  // Serial.print("Target pos: ");
-  // Serial.print(targetX);
   // Target position check (both axes within TARGET_BAND)
   bool xReached = abs(axes[0].piezoPosition - targetX) <= TARGET_BAND;
   // bool yReached = abs(axes[1].piezoPosition - targetY) <= TARGET_BAND;
   bool yReached = 1; // temporary until I get the y stage running too
-
-  // Serial.print(axes[0].piezoPosition - targetX);
-  // Serial.print(", ");
-
   return xReached & yReached;
 }
 
@@ -515,14 +498,6 @@ void setup() {
   axes[1].oldPiezoPosition = position_read(X_CS, X_CLK, X_DO);
   // axes[1].oldPiezoPosition = position_read(Y_CS, Y_CLK, Y_DO);
 
-  // Convert all positions from microns to encoder counts
-  for (int i = 0; i < NUM_COORDINATES; i++) {
-    coordinates[i].xCounts = coordinates[i].xMicrons / countsToMicrons / 0.9459754389;
-    coordinates[i].yCounts = coordinates[i].yMicrons / countsToMicrons / 0.9459754389;
-    // coordinates[i].xCounts = coordinates[i].xMicrons / countsToMicrons;
-    // coordinates[i].yCounts = coordinates[i].yMicrons / countsToMicrons;
-  }
-
   // Serial.println("Connected");
   write_freqs(0,0);
   delay(2000);
@@ -544,6 +519,15 @@ void loop() {
           write_freqs(0, 0);
           state = WAIT;
           startWaitTime = micros();
+          // Convert all positions from microns to encoder counts
+          for (int i = 0; i < NUM_COORDINATES; i++) {
+            coordinates[i].xCounts = coordinates[i].xMicrons / countsToMicrons / 0.9459754389 + axes[0].offsetVal;
+            coordinates[i].yCounts = coordinates[i].yMicrons / countsToMicrons / 0.9459754389 + axes[1].offsetVal;
+            // coordinates[i].xCounts = coordinates[i].xMicrons / countsToMicrons;
+            // coordinates[i].yCounts = coordinates[i].yMicrons / countsToMicrons;
+            // Serial.println(coordinates[i].xCounts);
+          }
+          // delay(5000);
         }
         break;
       }
@@ -578,7 +562,7 @@ void loop() {
         if (reached_pos) {
           // Serial.println("YOU REACHED THE POSITION");
           write_freqs(0, 0);
-          delay(2000);
+          delay(1000);
           startWaitTime = micros();
           old_state = MOVE;
           state = WAIT;
