@@ -157,27 +157,36 @@ struct Coordinate {
   int xCounts;
   int yCounts;
 };
-#define NUM_COORDINATES 19
+#define NUM_COORDINATES 9
 Coordinate coordinates[NUM_COORDINATES] = {
-  {-100, 0, 0, 0},
-  {-200, 0, 0, 0},
-  {-300, 0, 0, 0},
-  {-400, 0, 0, 0},
-  {-500, 0, 0, 0},
-  {-600, 0, 0, 0},
-  {-700, 0, 0, 0},
-  {-800, 0, 0, 0},
-  {-900, 0, 0, 0},
-  {-1000, 0, 0, 0},
-  {-900, 0, 0, 0},
-  {-800, 0, 0, 0},
-  {-700, 0, 0, 0},
-  {-600, 0, 0, 0},
-  {-500, 0, 0, 0},
-  {-400, 0, 0, 0},
-  {-300, 0, 0, 0},
-  {-200, 0, 0, 0},
-  {-100, 0, 0, 0}
+  {-10, 0, 0, 0},
+  {-20, 0, 0, 0},
+  {-30, 0, 0, 0},
+  {-40, 0, 0, 0},
+  {-50, 0, 0, 0},
+  {-40, 0, 0, 0},
+  {-30, 0, 0, 0},
+  {-20, 0, 0, 0},
+  {-10, 0, 0, 0}
+  // {-100, 0, 0, 0},
+  // {-200, 0, 0, 0},
+  // {-300, 0, 0, 0},
+  // {-400, 0, 0, 0},
+  // {-500, 0, 0, 0},
+  // {-600, 0, 0, 0},
+  // {-700, 0, 0, 0},
+  // {-800, 0, 0, 0},
+  // {-900, 0, 0, 0},
+  // {-1000, 0, 0, 0},
+  // {-900, 0, 0, 0},
+  // {-800, 0, 0, 0},
+  // {-700, 0, 0, 0},
+  // {-600, 0, 0, 0},
+  // {-500, 0, 0, 0},
+  // {-400, 0, 0, 0},
+  // {-300, 0, 0, 0},
+  // {-200, 0, 0, 0},
+  // {-100, 0, 0, 0}
 };
 // Track which coordinate we're at:
 int currentCoordinateIndex = 0; // Ignoring first one
@@ -330,6 +339,7 @@ void calibrateAxis(int axisIndex) {
       if (axisIndex == 0) {  // X-Axis
         write_freqs(0, startingFrequencyY);
         axes[0].offsetVal = axis.piezoPosition;
+        xEncoderCounts = 0;
         // Serial.print("Offset is: ");
         // Serial.println(axes[0].offsetVal);
       } else if (axisIndex == 1) {  // Y-Axis
