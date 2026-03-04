@@ -2,6 +2,41 @@
 #include <timers.h>
 #define DEADBAND 1.0F
 
+template <int windowSize>
+class MovingAverage {
+  private:
+    float buffer[windowSize];
+    int index = 0;
+    float sum = 0;
+    int count = 0;
+
+  public:
+    MovingAverage() {
+      for (int i = 0; i < windowSize; i++) buffer[i] = 0;
+    }
+
+    float filt(float xn) {
+      // Subtract the oldest value from the sum
+      sum -= buffer[index];
+      // Insert the new value
+      buffer[index] = xn;
+      sum += xn;
+      // Advance the index (wraps around)
+      index = (index + 1) % windowSize;
+      // Track how many values have been added (up to windowSize)
+      if (count < windowSize) count++;
+
+      return sum / count;
+    }
+
+    void reset() {
+      for (int i = 0; i < windowSize; i++) buffer[i] = 0;
+      index = 0;
+      sum = 0;
+      count = 0;
+    }
+};
+
 //// LOW PASS FILTER ////
 template <int order> // order is 1 or 2
 class LowPass
@@ -84,7 +119,8 @@ class LowPass
     }
 };
 
-LowPass<1> lp(4, 200, true);
+// LowPass<1> lp(4, 200, true);
+MovingAverage<5> ma;  // Change 10 to however many points you want
 
 //// PIN INITIALIZATION ////
 #define TIMING_PIN SCL     // Synchronization with Keyence Sensor
@@ -148,36 +184,63 @@ const int TARGET_BAND = 0;       // [encoder counts] "Close enough" range when m
 // int step_size_state = 0;
 // int targetX_open = 0;
 // int targetY_open = 0;
+bool reached_mag = false;
 bool reached_pos = false;
 
 //// INPUTS ////
 struct Coordinate {
   float xMicrons;
   float yMicrons;
-  int xCounts;
-  int yCounts;
+  int xMagCounts;
+  int yMagCounts;
+  float xNano; // in nm for posic encoder
+  float yNano; // in nm for posic encoder
+  int xPosCounts;
+  int yPosCounts;
 };
-#define NUM_COORDINATES 9
+#define NUM_COORDINATES 13
 Coordinate coordinates[NUM_COORDINATES] = {
-  {-10, 0, 0, 0},
-  {-20, 0, 0, 0},
-  {-30, 0, 0, 0},
-  {-40, 0, 0, 0},
-  {-50, 0, 0, 0},
-  {-40, 0, 0, 0},
-  {-30, 0, 0, 0},
-  {-20, 0, 0, 0},
-  {-10, 0, 0, 0}
-  // {-100, 0, 0, 0},
-  // {-200, 0, 0, 0},
-  // {-300, 0, 0, 0},
-  // {-400, 0, 0, 0},
-  // {-500, 0, 0, 0},
-  // {-600, 0, 0, 0},
-  // {-700, 0, 0, 0},
-  // {-800, 0, 0, 0},
-  // {-900, 0, 0, 0},
-  // {-1000, 0, 0, 0},
+  {-100, 0, 0, 0, 0, 0, 0, 0},
+  {-200, 0, 0, 0, -600, 0, 0, 0},
+  {-300, 0, 0, 0, -1000, 0, 0, 0},
+  {-400, 0, 0, 0, -1250, 0, 0, 0},
+  {-500, 0, 0, 0, -1000, 0, 0, 0},
+  {-600, 0, 0, 0, -600, 0, 0, 0},
+  {-700, 0, 0, 0, -500, 0, 0, 0},
+  {-600, 0, 0, 0, -600, 0, 0, 0},
+  {-500, 0, 0, 0, -1000, 0, 0, 0},
+  {-400, 0, 0, 0, -1250, 0, 0, 0},
+  {-300, 0, 0, 0, -1000, 0, 0, 0},
+  {-200, 0, 0, 0, -600, 0, 0, 0},
+  {-100, 0, 0, 0, 0, 0, 0, 0},
+  // {-10, 0, 0, 50, 0},
+  // {-10, 0, 0, 100, 0},
+  // {-10, 0, 0, 150, 0},
+  // {-10, 0, 0, 200, 0},
+  // {-10, 0, 0, 250, 0},
+  // {-10, 0, 0, 200, 0},
+  // {-10, 0, 0, 150, 0},
+  // {-10, 0, 0, 100, 0},
+  // {-10, 0, 0, 50, 0}
+  // {-10, 0, 0, 0},
+  // {-20, 0, 0, 0},
+  // {-30, 0, 0, 0},
+  // {-40, 0, 0, 0},
+  // {-50, 0, 0, 0},
+  // {-40, 0, 0, 0},
+  // {-30, 0, 0, 0},
+  // {-20, 0, 0, 0},
+  // {-10, 0, 0, 0}
+  // {-100, 0, 0, 0, 0, 0, 0, 0},
+  // {-200, 0, 0, 0, 0, 0, 0, 0},
+  // {-300, 0, 0, 0, 0, 0, 0, 0},
+  // {-400, 0, 0, 0, 0, 0, 0, 0},
+  // {-500, 0, 0, 0, 0, 0, 0, 0},
+  // {-600, 0, 0, 0, 0, 0, 0, 0},
+  // {-700, 0, 0, 0, 0, 0, 0, 0},
+  // {-800, 0, 0, 0, 0, 0, 0, 0},
+  // {-900, 0, 0, 0, 0, 0, 0, 0},
+  // {-1000, 0, 0, 0, 0, 0, 0, 0},
   // {-900, 0, 0, 0},
   // {-800, 0, 0, 0},
   // {-700, 0, 0, 0},
@@ -208,12 +271,15 @@ void display_position(){
   // // Serial.print("Y");
 
   // Compute the filtered signal
-  axes[0].piezoPosition = lp.filt(true_position);
+  // axes[0].piezoPosition = lp.filt(true_position);
+  // axes[0].piezoPosition = true_position;
+  axes[0].piezoPosition = ma.filt(true_position);
 
   // Output
   Serial.print(millis());
   Serial.print(", ");
-  Serial.print(axes[0].piezoPosition * 0.9459754389);
+  // Serial.print(axes[0].piezoPosition * 0.9459754389);
+  Serial.print(axes[0].piezoPosition);
   Serial.print(", ");
   Serial.println(xEncoderCounts);
 }
@@ -305,10 +371,12 @@ void updateXPosition() {
   }
   xEncoderStatus &= 15;
   if (xEncoderStatus==2 || xEncoderStatus==4 || xEncoderStatus==11 || xEncoderStatus==13) {
-    xEncoderCounts ++;         // increase the encoder count by one
+    // xEncoderCounts ++;         // increase the encoder count by one
+    xEncoderCounts --;  
   } 
   else if (xEncoderStatus==1 || xEncoderStatus==7 || xEncoderStatus==8 || xEncoderStatus==14) {
-    xEncoderCounts --;         // decrease the encoder count by one
+    // xEncoderCounts --;         // decrease the encoder count by one
+    xEncoderCounts ++;
   }
   // isr_end_time = micros();
   // last_isr_duration = isr_end_time - isr_start_time;
@@ -321,6 +389,7 @@ const unsigned long duration = 2000;       // 2 seconds in milliseconds
 const int startingFrequencyX = -700;
 const int startingFrequencyY = 0;
 const float countsToMicrons = 0.48828125;  // 2000 microns/2^12 counts
+const float countsToNano = 19.53125;
 void calibrateAxis(int axisIndex) {
   AxisStatus &axis = axes[axisIndex];
   if (axis.calibrationDone) return;
@@ -360,7 +429,8 @@ void calibrateAxis(int axisIndex) {
 //// PID CONTROL ////
 unsigned long executionDuration = 0;                        // [microseconds] Time between this and the previous loop execution.  Variable used for integrals and derivatives
 unsigned long lastExecutionTime = 0;                        // [microseconds] System clock value at the moment the loop was started the last time
-int targetXPosition = 0, targetYPosition = 0;
+int targetXPosition_mag = 0, targetYPosition_mag = 0;
+int targetXPosition_pos = 0, targetYPosition_pos = 0;
 float positionErrorX = 0, positionErrorY = 0;
 float integralErrorX = 0, integralErrorY = 0;
 float velocityErrorX = 0, velocityErrorY = 0;
@@ -370,28 +440,28 @@ int previousPiezoPositionX = 0, previousPiezoPositionY = 0;
 long previousVelCompTimeX = 0, previousVelCompTimeY = 0;
 const int MIN_VEL_COMP_COUNT = 2;                            // [encoder counts] Minimal change in piezo position that must happen between two velocity measurements
 const long MIN_VEL_COMP_TIME = 10000;                        // [microseconds] Minimal time that must pass between two velocity measurements
-// float KP = 1;                                                // [Volt / encoder counts] P-Gain
-// float KD = 0.0005;                                           // [Volt * seconds / encoder counts] D-Gain
-// float KI = 0;                                                // [Volt / (encoder counts * seconds)] I-Gain
-float KP = 1;                                                // [Volt / encoder counts] P-Gain
-float KD = 0;                                           // [Volt * seconds / encoder counts] D-Gain
-float KI = 0;                                                // [Volt / (encoder counts * seconds)] I-Gain
+float KP_mag = 1;                                                // [Volt / encoder counts] P-Gain
+float KD_mag = 0.0005;                                           // [Volt * seconds / encoder counts] D-Gain
+float KI_mag = 0;                                                // [Volt / (encoder counts * seconds)] I-Gain
+float KP_pos = 0.1;                                                // [Volt / encoder counts] P-Gain
+float KD_pos = 0.000;                                           // [Volt * seconds / encoder counts] D-Gain
+float KI_pos = 0.000;                                                // [Volt / (encoder counts * seconds)] I-Gain
 
-bool closed_loop_positioning(int targetX, int targetY){
+bool closed_loop_positioning(int targetX, int targetY, int currentX, int currentY, float kp, float kd, float ki){
   int limit = 500;
   executionDuration = micros() - lastExecutionTime;
   lastExecutionTime = micros();
 
-  // --------- X Axis ---------
-  if ((abs(axes[0].piezoPosition - previousPiezoPositionX) > MIN_VEL_COMP_COUNT) || (micros() - previousVelCompTimeX) > MIN_VEL_COMP_TIME) {
-    piezoVelocityX = (double)(axes[0].piezoPosition - previousPiezoPositionX) * 1000000 / (micros() - previousVelCompTimeX);
-    previousPiezoPositionX = axes[0].piezoPosition;
+  // --------- X Axis --------- //
+  if ((abs(currentX - previousPiezoPositionX) > MIN_VEL_COMP_COUNT) || (micros() - previousVelCompTimeX) > MIN_VEL_COMP_TIME) {
+    piezoVelocityX = (double)(currentX - previousPiezoPositionX) * 1000000 / (micros() - previousVelCompTimeX);
+    previousPiezoPositionX = currentX;
     previousVelCompTimeX = micros();
   }
-  positionErrorX = targetX - axes[0].piezoPosition;
+  positionErrorX = targetX - currentX;
   integralErrorX += positionErrorX * (float)(executionDuration) / 1000000;
   velocityErrorX = 0 - piezoVelocityX;
-  desiredFrequencyX = KP * positionErrorX + KI * integralErrorX + KD * velocityErrorX;
+  desiredFrequencyX = kp * positionErrorX + ki * integralErrorX + kd * velocityErrorX;
 
   if (desiredFrequencyX >= limit) desiredFrequencyX = limit;
   else if (desiredFrequencyX <= -limit) desiredFrequencyX = -limit;
@@ -407,7 +477,7 @@ bool closed_loop_positioning(int targetX, int targetY){
   positionErrorY = targetY - axes[1].piezoPosition;
   integralErrorY += positionErrorY * (float)(executionDuration) / 1000000;
   velocityErrorY = 0 - piezoVelocityY;
-  desiredFrequencyY = KP * positionErrorY + KI * integralErrorY + KD * velocityErrorY;
+  desiredFrequencyY = kp * positionErrorY + ki * integralErrorY + kd * velocityErrorY;
 
   if (desiredFrequencyY >= limit) desiredFrequencyY = limit;
   else if (desiredFrequencyY <= -limit) desiredFrequencyY = -limit;
@@ -417,7 +487,8 @@ bool closed_loop_positioning(int targetX, int targetY){
   write_freqs(-desiredFrequencyX, desiredFrequencyY);
 
   // Target position check (both axes within TARGET_BAND)
-  bool xReached = abs(axes[0].piezoPosition - targetX) <= TARGET_BAND;
+  bool xReached = abs(targetX - currentX) <= TARGET_BAND;
+  // bool xReached = abs(axes[0].piezoPosition - targetX) <= TARGET_BAND;
   // bool yReached = abs(axes[1].piezoPosition - targetY) <= TARGET_BAND;
   bool yReached = 1; // temporary until I get the y stage running too
   return xReached & yReached;
@@ -510,7 +581,18 @@ void setup() {
 
   // Serial.println("Connected");
   write_freqs(0,0);
-  delay(2000);
+  xEncoderCounts = 0;
+  for (int i = 0; i < NUM_COORDINATES; i++) {
+    coordinates[i].xMagCounts = coordinates[i].xMicrons / countsToMicrons / 0.9459754389 / 1000 + axes[0].offsetVal;
+    coordinates[i].yMagCounts = coordinates[i].yMicrons / countsToMicrons / 0.9459754389 / 1000 + axes[1].offsetVal;
+    coordinates[i].xPosCounts = coordinates[i].xNano / countsToNano;
+    coordinates[i].yPosCounts = coordinates[i].yNano / countsToNano;
+    // coordinates[i].xCounts = coordinates[i].xMicrons / countsToMicrons;
+    // coordinates[i].yCounts = coordinates[i].yMicrons / countsToMicrons;
+    // Serial.println(coordinates[i].xMagCounts);
+    // Serial.println(coordinates[i].xPosCounts);
+  }
+  delay(1000);
 }
 
 void loop() {
@@ -531,11 +613,14 @@ void loop() {
           startWaitTime = micros();
           // Convert all positions from microns to encoder counts
           for (int i = 0; i < NUM_COORDINATES; i++) {
-            coordinates[i].xCounts = coordinates[i].xMicrons / countsToMicrons / 0.9459754389 + axes[0].offsetVal;
-            coordinates[i].yCounts = coordinates[i].yMicrons / countsToMicrons / 0.9459754389 + axes[1].offsetVal;
+            coordinates[i].xMagCounts = coordinates[i].xMicrons / countsToMicrons / 0.9459754389 + axes[0].offsetVal;
+            coordinates[i].yMagCounts = coordinates[i].yMicrons / countsToMicrons / 0.9459754389 + axes[1].offsetVal;
+            coordinates[i].xPosCounts = coordinates[i].xNano / countsToNano;
+            coordinates[i].yPosCounts = coordinates[i].yNano / countsToNano;
             // coordinates[i].xCounts = coordinates[i].xMicrons / countsToMicrons;
             // coordinates[i].yCounts = coordinates[i].yMicrons / countsToMicrons;
-            // Serial.println(coordinates[i].xCounts);
+            // Serial.println(coordinates[i].xMagCounts);
+            // Serial.println(coordinates[i].xPosCounts);
           }
           // delay(5000);
         }
@@ -557,19 +642,26 @@ void loop() {
     case MOVE:
       {
         // Set targets
-        targetXPosition = coordinates[currentCoordinateIndex].xCounts;
-        targetYPosition = coordinates[currentCoordinateIndex].yCounts;
+        targetXPosition_mag = coordinates[currentCoordinateIndex].xMagCounts;
+        targetYPosition_mag = coordinates[currentCoordinateIndex].yMagCounts;
+        targetXPosition_pos = coordinates[currentCoordinateIndex].xPosCounts;
+        targetYPosition_pos = coordinates[currentCoordinateIndex].yPosCounts;
 
-        // Serial.print("Coordinates: ");
-        // Serial.println(currentCoordinateIndex);
-
-        while (!reached_pos){
+        while (!reached_mag && !reached_pos){
           triggerMeasurement(); 
           display_position();
-          reached_pos = closed_loop_positioning(targetXPosition, targetYPosition);
-          delay(5);  // small delay for loop stability
+          reached_mag = closed_loop_positioning(targetXPosition_mag, targetYPosition_mag, axes[0].piezoPosition, axes[1].piezoPosition, KP_mag, KD_mag, KI_mag);          
+          // delay(5);  // small delay for loop stability
         }
-        if (reached_pos) {
+        if(reached_mag){
+            xEncoderCounts = 0;
+        }
+        while (reached_mag && !reached_pos){
+          triggerMeasurement(); 
+          display_position();
+          reached_pos = closed_loop_positioning(targetXPosition_pos, targetYPosition_pos, xEncoderCounts, 0, KP_pos, KD_pos, KI_pos);
+        }
+        if (reached_mag && reached_pos) {
           // Serial.println("YOU REACHED THE POSITION");
           write_freqs(0, 0);
           delay(1000);
@@ -696,6 +788,7 @@ void loop() {
           integralErrorX = 0;
           integralErrorY = 0;
           currentCoordinateIndex++;
+          reached_mag = false;
           reached_pos = false;
           if (currentCoordinateIndex < NUM_COORDINATES) {
             state = MOVE;  // Jump to next coordinate
