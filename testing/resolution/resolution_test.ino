@@ -146,7 +146,7 @@ const int READ = 2;
 const int MOVE = 3;
 const int OPEN = 4;
 const int WAIT = 5;
-int state = CALIBRATE;
+int state = MOVE;
 int old_state = CALIBRATE;
 bool axis_state = 0;       // 0 is X axis, 1 is Y axis
 bool unusedXFlag = true;   // For tracking if offset is used
@@ -198,21 +198,19 @@ struct Coordinate {
   int xPosCounts;
   int yPosCounts;
 };
-#define NUM_COORDINATES 13
+#define NUM_COORDINATES 11
 Coordinate coordinates[NUM_COORDINATES] = {
-  {-100, 0, 0, 0, 0, 0, 0, 0},
-  {-200, 0, 0, 0, -600, 0, 0, 0},
-  {-300, 0, 0, 0, -1000, 0, 0, 0},
-  {-400, 0, 0, 0, -1250, 0, 0, 0},
-  {-500, 0, 0, 0, -1000, 0, 0, 0},
-  {-600, 0, 0, 0, -600, 0, 0, 0},
-  {-700, 0, 0, 0, -500, 0, 0, 0},
-  {-600, 0, 0, 0, -600, 0, 0, 0},
-  {-500, 0, 0, 0, -1000, 0, 0, 0},
-  {-400, 0, 0, 0, -1250, 0, 0, 0},
-  {-300, 0, 0, 0, -1000, 0, 0, 0},
-  {-200, 0, 0, 0, -600, 0, 0, 0},
-  {-100, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, -600, 0, 0, 0},
+  {0, 0, 0, 0, -1000, 0, 0, 0},
+  {0, 0, 0, 0, -2500, 0, 0, 0},
+  {0, 0, 0, 0, -5000, 0, 0, 0},
+  {0, 0, 0, 0, -10000, 0, 0, 0},
+  {0, 0, 0, 0, -5000, 0, 0, 0},
+  {0, 0, 0, 0, -2500, 0, 0, 0},
+  {0, 0, 0, 0, -1000, 0, 0, 0},
+  {0, 0, 0, 0, -600, 0, 0, 0},
+  {0, 0, 0, 0, 0, 0, 0, 0},
   // {-10, 0, 0, 50, 0},
   // {-10, 0, 0, 100, 0},
   // {-10, 0, 0, 150, 0},
@@ -315,35 +313,6 @@ int position_read(uint8_t csPin, uint8_t clockPin, uint8_t dataPin) {
   } else {
     return position;
   }
-}
-int track_position(int current_pos, int new_pos, int old_pos, int index, bool offsetFlag, int offset) {
-  int diff = new_pos - old_pos;
-  Serial.print("Diff: ");
-  Serial.print(diff);
-  Serial.print(", ");
-  int max_float_limit = 4096;
-  if (offsetFlag & (unusedXFlag | unusedYFlag)) {
-    current_pos = current_pos - offset;
-    if (index == 0) {
-      unusedXFlag = false;  // X is offsetted
-      unusedYFlag = false;  // Y is offsetted, will need to delete in the future
-      index ++;
-    } else if (index == 1) {
-      unusedYFlag = false;  // Y is offsetted
-      index ++;
-    }
-  }
-  if (abs(diff) > max_float_limit / 4) {  // wrap around occurred
-    if (diff > 0) {            // backward motion occurred
-      current_pos = current_pos - (max_float_limit - new_pos) - old_pos;
-    } else {  // forward motion occured
-      current_pos = current_pos + (max_float_limit - old_pos) + new_pos;
-    }
-  } 
-  else {  // no wrap around
-    current_pos = current_pos + diff;
-  }
-  return current_pos;
 }
 int track_raw_position(int new_pos, int old_pos, int pos_index){
   int diff = new_pos - old_pos;
@@ -448,7 +417,7 @@ float KD_pos = 0.000;                                           // [Volt * secon
 float KI_pos = 0.000;                                                // [Volt / (encoder counts * seconds)] I-Gain
 
 bool closed_loop_positioning(int targetX, int targetY, int currentX, int currentY, float kp, float kd, float ki){
-  int limit = 500;
+  int limit = 15;
   executionDuration = micros() - lastExecutionTime;
   lastExecutionTime = micros();
 
@@ -592,7 +561,7 @@ void setup() {
     // Serial.println(coordinates[i].xMagCounts);
     // Serial.println(coordinates[i].xPosCounts);
   }
-  delay(1000);
+  delay(7000);
 }
 
 void loop() {
@@ -647,21 +616,34 @@ void loop() {
         targetXPosition_pos = coordinates[currentCoordinateIndex].xPosCounts;
         targetYPosition_pos = coordinates[currentCoordinateIndex].yPosCounts;
 
-        while (!reached_mag && !reached_pos){
-          triggerMeasurement(); 
-          display_position();
-          reached_mag = closed_loop_positioning(targetXPosition_mag, targetYPosition_mag, axes[0].piezoPosition, axes[1].piezoPosition, KP_mag, KD_mag, KI_mag);          
-          // delay(5);  // small delay for loop stability
-        }
-        if(reached_mag){
-            xEncoderCounts = 0;
-        }
-        while (reached_mag && !reached_pos){
+        // while (!reached_mag && !reached_pos){
+        //   triggerMeasurement(); 
+        //   display_position();
+        //   reached_mag = closed_loop_positioning(targetXPosition_mag, targetYPosition_mag, axes[0].piezoPosition, axes[1].piezoPosition, KP_mag, KD_mag, KI_mag);          
+        //   // delay(5);  // small delay for loop stability
+        // }
+        // if(reached_mag){
+        //     xEncoderCounts = 0;
+        // }
+        // while (reached_mag && !reached_pos){
+        //   triggerMeasurement(); 
+        //   display_position();
+        //   reached_pos = closed_loop_positioning(targetXPosition_pos, targetYPosition_pos, xEncoderCounts, 0, KP_pos, KD_pos, KI_pos);
+        // }
+        // if (reached_mag && reached_pos) {
+        //   // Serial.println("YOU REACHED THE POSITION");
+        //   write_freqs(0, 0);
+        //   delay(1000);
+        //   startWaitTime = micros();
+        //   old_state = MOVE;
+        //   state = WAIT;
+        // }
+        while (!reached_pos){
           triggerMeasurement(); 
           display_position();
           reached_pos = closed_loop_positioning(targetXPosition_pos, targetYPosition_pos, xEncoderCounts, 0, KP_pos, KD_pos, KI_pos);
         }
-        if (reached_mag && reached_pos) {
+        if (reached_pos) {
           // Serial.println("YOU REACHED THE POSITION");
           write_freqs(0, 0);
           delay(1000);
