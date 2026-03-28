@@ -1,5 +1,7 @@
 #include <Arduino.h>
 #include <timers.h>
+#include "mag_encoder_bkwd_LUT_V136.h"
+#include "mag_encoder_fwd_LUT_V136.h"
 #define DEADBAND 1.0F
 
 template <int windowSize>
@@ -142,11 +144,9 @@ void triggerMeasurement() {
 
 //// STATE MACHINE ////
 const int CALIBRATE = 1;
-const int READ = 2;
-const int MOVE = 3;
-const int OPEN = 4;
-const int WAIT = 5;
-int state = MOVE;
+const int MOVE = 2;
+const int WAIT = 3;
+int state = CALIBRATE;
 int old_state = CALIBRATE;
 bool axis_state = 0;       // 0 is X axis, 1 is Y axis
 bool unusedXFlag = true;   // For tracking if offset is used
@@ -156,6 +156,7 @@ bool readComplete = false; // Checks if reading is complete before moving stages
 //// ENCODER TRACKING ////
 volatile int xEncoderStatus  = 0;      // [binary] Past and Current A&B values of the encoder  (Declared 'volatile', since it is updated in a function called by interrupts)
 volatile long xEncoderCounts = 0;
+int direction = 0; // 0 = forward, 1 = backward, 2 = no movement
 
 #define NUM_POSITION 30 // [YOUR LENGTH] / 2 mm
 int raw_position[NUM_POSITION];
@@ -166,14 +167,15 @@ struct AxisStatus { // units are in microns
   volatile int piezoPosition;
   volatile int oldPiezoPosition;
   volatile int newPiezoPosition;
+  volatile int truePosition;
   volatile int offsetVal;
   bool calibrationDone;
   unsigned long startTime;
 };
 #define NUM_AXES 2  // X, Y
 AxisStatus axes[NUM_AXES] = {
-  { 0, 0, 0, 0, false, 0 },  // X
-  { 0, 0, 0, 0, false, 0 },  // Y
+  { 0, 0, 0, 0, 0, false, 0 },  // X
+  { 0, 0, 0, 0, 0, false, 0 },  // Y
 };
 
 //// TIMING
@@ -198,28 +200,42 @@ struct Coordinate {
   int xPosCounts;
   int yPosCounts;
 };
-#define NUM_COORDINATES 11
+#define NUM_COORDINATES 15
 Coordinate coordinates[NUM_COORDINATES] = {
-  {0, 0, 0, 0, 0, 0, 0, 0},
-  {0, 0, 0, 0, -600, 0, 0, 0},
-  {0, 0, 0, 0, -1000, 0, 0, 0},
-  {0, 0, 0, 0, -2500, 0, 0, 0},
-  {0, 0, 0, 0, -5000, 0, 0, 0},
-  {0, 0, 0, 0, -10000, 0, 0, 0},
-  {0, 0, 0, 0, -5000, 0, 0, 0},
-  {0, 0, 0, 0, -2500, 0, 0, 0},
-  {0, 0, 0, 0, -1000, 0, 0, 0},
-  {0, 0, 0, 0, -600, 0, 0, 0},
-  {0, 0, 0, 0, 0, 0, 0, 0},
-  // {-10, 0, 0, 50, 0},
-  // {-10, 0, 0, 100, 0},
-  // {-10, 0, 0, 150, 0},
-  // {-10, 0, 0, 200, 0},
-  // {-10, 0, 0, 250, 0},
-  // {-10, 0, 0, 200, 0},
-  // {-10, 0, 0, 150, 0},
-  // {-10, 0, 0, 100, 0},
-  // {-10, 0, 0, 50, 0}
+  // {-100, 0, 0, 0, 0, 0, 0, 0},
+  // {-100, 0, 0, 0, 0, 0, 0, 0},
+  // {-3000, 0, 0, 0, 0, 0, 0, 0},
+  // {-100, 0, 0, 0, 0, 0, 0, 0}
+  // {-200, 0, 0, 0, 0, 0, 0, 0},
+  {-400, 0, 0, 0, 0, 0, 0, 0},
+  {-600, 0, 0, 0, 0, 0, 0, 0},
+  {-800, 0, 0, 0, 0, 0, 0, 0},
+  {-1000, 0, 0, 0, 0, 0, 0, 0},
+  {-1200, 0, 0, 0, 0, 0, 0, 0},
+  {-1400, 0, 0, 0, 0, 0, 0, 0},
+  {-1600, 0, 0, 0, 0, 0, 0, 0},
+  {-1800, 0, 0, 0, 0, 0, 0, 0},
+  {-1600, 0, 0, 0, 0, 0, 0, 0},
+  {-1400, 0, 0, 0, 0, 0, 0, 0},
+  {-1200, 0, 0, 0, 0, 0, 0, 0},
+  {-1000, 0, 0, 0, 0, 0, 0, 0},
+  {-800, 0, 0, 0, 0, 0, 0, 0},
+  {-600, 0, 0, 0, 0, 0, 0, 0},
+  {-400, 0, 0, 0, 0, 0, 0, 0}
+  // {-200, 0, 0, 0, 0, 0, 0, 0}
+  // {-100, 0, 0, 0, 0, 0, 0, 0}
+  // {-300, 0, 0, 0, 0, 0, 0, 0},
+  // {-100, 0, 0, 0, 0, 0, 0, 0},
+  // {0, 0, 0, 0, -50000, 0, 0, 0},
+  // {0, 0, 0, 0, -100000, 0, 0, 0},
+  // {0, 0, 0, 0, -500000, 0, 0, 0},
+  // {0, 0, 0, 0, -1000000, 0, 0, 0},
+  // {0, 0, 0, 0, -1500000, 0, 0, 0},
+  // {0, 0, 0, 0, -1000000, 0, 0, 0},
+  // {0, 0, 0, 0, -500000, 0, 0, 0},
+  // {0, 0, 0, 0, -100000, 0, 0, 0},
+  // {0, 0, 0, 0, -50000, 0, 0, 0},
+  
   // {-10, 0, 0, 0},
   // {-20, 0, 0, 0},
   // {-30, 0, 0, 0},
@@ -251,11 +267,22 @@ Coordinate coordinates[NUM_COORDINATES] = {
 };
 // Track which coordinate we're at:
 int currentCoordinateIndex = 0; // Ignoring first one
+int error_correction = 0;
+int new_error_correction = 0;
 
 void display_position(){
   // TRACKING X POSITION
   axes[0].newPiezoPosition = position_read(X_CS, X_CLK, X_DO);
   position_index = track_raw_position(axes[0].newPiezoPosition, axes[0].oldPiezoPosition, position_index);
+
+  if (axes[0].oldPiezoPosition > axes[0].newPiezoPosition){
+    direction = 0;
+  } else if (axes[0].oldPiezoPosition < axes[0].newPiezoPosition) {
+    direction = 1;
+  }
+  else{
+    direction = 2;
+  }
   int true_position = raw_position[position_index] + 4096*(position_index-15);
   axes[0].oldPiezoPosition = axes[0].newPiezoPosition;
 
@@ -271,15 +298,46 @@ void display_position(){
   // Compute the filtered signal
   // axes[0].piezoPosition = lp.filt(true_position);
   // axes[0].piezoPosition = true_position;
+  // Serial.println(direction);
   axes[0].piezoPosition = ma.filt(true_position);
+  axes[0].truePosition = int(axes[0].piezoPosition*0.95);
+  if (direction == 0){
+    // axes[0].truePosition = axes[0].piezoPosition;
+    new_error_correction = mag_encoder_fwd_LUT_V136[abs(position_index-15)][axes[0].newPiezoPosition];
+    if ((abs(error_correction - new_error_correction) < 5) || (error_correction == 0) || (new_error_correction == 0)){
+      error_correction = new_error_correction;
+    }
+    // Serial.print(abs(position_index-15));
+    // Serial.print(", forward, ");
+    // Serial.println(axes[0].newPiezoPosition);
+  } else if (direction == 1){
+    // axes[0].truePosition = axes[0].piezoPosition;
+    new_error_correction = mag_encoder_fwd_LUT_V136[abs(position_index-15)][axes[0].newPiezoPosition];
+    if ((abs(error_correction - new_error_correction) < 5) || (error_correction == 0) || (new_error_correction == 0)){
+      error_correction = new_error_correction;
+    }
+    // Serial.print(abs(position_index-15));
+    // Serial.print(", backward, ");
+    // Serial.println(axes[0].newPiezoPosition);
+  }
+  // else {
+  //   // axes[0].truePosition = axes[0].piezoPosition;
+  // }
+  
+  axes[0].truePosition = axes[0].piezoPosition + error_correction;
 
   // Output
   Serial.print(millis());
   Serial.print(", ");
   // Serial.print(axes[0].piezoPosition * 0.9459754389);
-  Serial.print(axes[0].piezoPosition);
+  Serial.print(axes[0].truePosition);
   Serial.print(", ");
-  Serial.println(xEncoderCounts);
+  Serial.print(error_correction);
+  Serial.print(", ");
+  Serial.println(axes[0].newPiezoPosition); 
+  // Serial.print(xEncoderCounts);
+  // Serial.print(", ");
+  // Serial.println(raw_position[position_index]);
 }
 
 uint16_t read_bits(uint8_t dataPin, uint8_t clockPin, uint8_t bitOrder, uint8_t numBits) {
@@ -355,7 +413,7 @@ void updateXPosition() {
 const int calibrateRange = 5;
 // unsigned long startTime         = 0;
 const unsigned long duration = 2000;       // 2 seconds in milliseconds
-const int startingFrequencyX = -700;
+const int startingFrequencyX = 700;
 const int startingFrequencyY = 0;
 const float countsToMicrons = 0.48828125;  // 2000 microns/2^12 counts
 const float countsToNano = 19.53125;
@@ -410,14 +468,14 @@ long previousVelCompTimeX = 0, previousVelCompTimeY = 0;
 const int MIN_VEL_COMP_COUNT = 2;                            // [encoder counts] Minimal change in piezo position that must happen between two velocity measurements
 const long MIN_VEL_COMP_TIME = 10000;                        // [microseconds] Minimal time that must pass between two velocity measurements
 float KP_mag = 1;                                                // [Volt / encoder counts] P-Gain
-float KD_mag = 0.0005;                                           // [Volt * seconds / encoder counts] D-Gain
+float KD_mag = 0.001;                                           // [Volt * seconds / encoder counts] D-Gain
 float KI_mag = 0;                                                // [Volt / (encoder counts * seconds)] I-Gain
 float KP_pos = 0.1;                                                // [Volt / encoder counts] P-Gain
-float KD_pos = 0.000;                                           // [Volt * seconds / encoder counts] D-Gain
+float KD_pos = 0.00;                                           // [Volt * seconds / encoder counts] D-Gain
 float KI_pos = 0.000;                                                // [Volt / (encoder counts * seconds)] I-Gain
 
 bool closed_loop_positioning(int targetX, int targetY, int currentX, int currentY, float kp, float kd, float ki){
-  int limit = 15;
+  int limit = 50;
   executionDuration = micros() - lastExecutionTime;
   lastExecutionTime = micros();
 
@@ -453,7 +511,10 @@ bool closed_loop_positioning(int targetX, int targetY, int currentX, int current
   else if ((desiredFrequencyY >= 0) && (desiredFrequencyY <= 10)) desiredFrequencyY = 1;
   else if ((desiredFrequencyY <= 0) && (desiredFrequencyY >= -10)) desiredFrequencyY = -1;
 
-  write_freqs(-desiredFrequencyX, desiredFrequencyY);
+  write_freqs(desiredFrequencyX, desiredFrequencyY);
+  // Serial.print("Frequency: ");
+  // Serial.print(desiredFrequencyX);
+  // Serial.print(", Position: ");
 
   // Target position check (both axes within TARGET_BAND)
   bool xReached = abs(targetX - currentX) <= TARGET_BAND;
@@ -552,8 +613,10 @@ void setup() {
   write_freqs(0,0);
   xEncoderCounts = 0;
   for (int i = 0; i < NUM_COORDINATES; i++) {
-    coordinates[i].xMagCounts = coordinates[i].xMicrons / countsToMicrons / 0.9459754389 / 1000 + axes[0].offsetVal;
-    coordinates[i].yMagCounts = coordinates[i].yMicrons / countsToMicrons / 0.9459754389 / 1000 + axes[1].offsetVal;
+    // coordinates[i].xMagCounts = coordinates[i].xMicrons / countsToMicrons / 0.9459754389 / 1000 + axes[0].offsetVal;
+    // coordinates[i].yMagCounts = coordinates[i].yMicrons / countsToMicrons / 0.9459754389 / 1000 + axes[1].offsetVal;
+    coordinates[i].xMagCounts = coordinates[i].xMicrons / countsToMicrons / 1000 + axes[0].offsetVal;
+    coordinates[i].yMagCounts = coordinates[i].yMicrons / countsToMicrons / 1000 + axes[1].offsetVal;
     coordinates[i].xPosCounts = coordinates[i].xNano / countsToNano;
     coordinates[i].yPosCounts = coordinates[i].yNano / countsToNano;
     // coordinates[i].xCounts = coordinates[i].xMicrons / countsToMicrons;
@@ -561,7 +624,7 @@ void setup() {
     // Serial.println(coordinates[i].xMagCounts);
     // Serial.println(coordinates[i].xPosCounts);
   }
-  delay(7000);
+  delay(1000);
 }
 
 void loop() {
@@ -582,8 +645,10 @@ void loop() {
           startWaitTime = micros();
           // Convert all positions from microns to encoder counts
           for (int i = 0; i < NUM_COORDINATES; i++) {
-            coordinates[i].xMagCounts = coordinates[i].xMicrons / countsToMicrons / 0.9459754389 + axes[0].offsetVal;
-            coordinates[i].yMagCounts = coordinates[i].yMicrons / countsToMicrons / 0.9459754389 + axes[1].offsetVal;
+            // coordinates[i].xMagCounts = coordinates[i].xMicrons / countsToMicrons / 0.9459754389 + axes[0].offsetVal;
+            // coordinates[i].yMagCounts = coordinates[i].yMicrons / countsToMicrons / 0.9459754389 + axes[1].offsetVal;
+            coordinates[i].xMagCounts = coordinates[i].xMicrons / countsToMicrons + axes[0].offsetVal;
+            coordinates[i].yMagCounts = coordinates[i].yMicrons / countsToMicrons + axes[1].offsetVal;
             coordinates[i].xPosCounts = coordinates[i].xNano / countsToNano;
             coordinates[i].yPosCounts = coordinates[i].yNano / countsToNano;
             // coordinates[i].xCounts = coordinates[i].xMicrons / countsToMicrons;
@@ -595,19 +660,6 @@ void loop() {
         }
         break;
       }
-    // case READ:
-    // {
-    //   readSerialInput();
-    //   // Wait until all coordinates have been received before moving on
-    //   if (readComplete) {
-    //     // Serial.println("All coordinates received, moving to MOVE state");
-    //     readComplete = false;  // reset for next round, if needed
-    //     // currentCoordinateIndex = 0; // reset index for movement
-    //     old_state = READ;
-    //     state = MOVE;
-    //   }
-    //   break;
-    // }
     case MOVE:
       {
         // Set targets
@@ -616,34 +668,24 @@ void loop() {
         targetXPosition_pos = coordinates[currentCoordinateIndex].xPosCounts;
         targetYPosition_pos = coordinates[currentCoordinateIndex].yPosCounts;
 
+        while (!reached_mag){
         // while (!reached_mag && !reached_pos){
-        //   triggerMeasurement(); 
-        //   display_position();
-        //   reached_mag = closed_loop_positioning(targetXPosition_mag, targetYPosition_mag, axes[0].piezoPosition, axes[1].piezoPosition, KP_mag, KD_mag, KI_mag);          
-        //   // delay(5);  // small delay for loop stability
-        // }
+          triggerMeasurement(); 
+          display_position();
+          reached_mag = closed_loop_positioning(targetXPosition_mag, targetYPosition_mag, axes[0].truePosition, axes[1].piezoPosition, KP_mag, KD_mag, KI_mag);          
+          delay(5);  // small delay for loop stability
+        }
         // if(reached_mag){
         //     xEncoderCounts = 0;
         // }
+        // // while (!reached_pos){
         // while (reached_mag && !reached_pos){
         //   triggerMeasurement(); 
         //   display_position();
         //   reached_pos = closed_loop_positioning(targetXPosition_pos, targetYPosition_pos, xEncoderCounts, 0, KP_pos, KD_pos, KI_pos);
         // }
+        if (reached_mag) {
         // if (reached_mag && reached_pos) {
-        //   // Serial.println("YOU REACHED THE POSITION");
-        //   write_freqs(0, 0);
-        //   delay(1000);
-        //   startWaitTime = micros();
-        //   old_state = MOVE;
-        //   state = WAIT;
-        // }
-        while (!reached_pos){
-          triggerMeasurement(); 
-          display_position();
-          reached_pos = closed_loop_positioning(targetXPosition_pos, targetYPosition_pos, xEncoderCounts, 0, KP_pos, KD_pos, KI_pos);
-        }
-        if (reached_pos) {
           // Serial.println("YOU REACHED THE POSITION");
           write_freqs(0, 0);
           delay(1000);
@@ -654,101 +696,6 @@ void loop() {
         break;
       }
 
-  //   case OPEN:
-  //     {
-  //       old_state = OPEN;
-  //       while (true) {
-  //         display_position();
-
-  //         // Check for input from Python
-  //         if (Serial.available() > 0) {
-  //           char command = Serial.read(); 
-  //           if (command == 'F'){
-  //             Serial.println("Received F command");
-  //             step_size_state = 0;
-  //           }
-  //           else if (command == 'G'){
-  //             Serial.println("Received G command");
-  //             step_size_state = 1000;
-  //           }
-  //           else if (command == 'H'){
-  //             Serial.println("Received H command");
-  //             step_size_state = 100;
-  //           }
-  //           else if (command == 'J'){
-  //             Serial.println("Received J command");
-  //             step_size_state = 10;
-  //           }
-  //           if (step_size_state > 0){
-  //             // Serial.print("Target X: ");
-  //             // Serial.println(targetX_open);
-  //             // Serial.print("Target Y: ");
-  //             // Serial.println(targetY_open);
-  //             while (!reached_pos){
-  //               display_position();
-  //               reached_pos = closed_loop_positioning(targetX_open/countsToMicrons, targetY_open/countsToMicrons);
-  //               delay(5);  // small delay for loop stability
-  //             }
-  //             if (reached_pos) {
-  //               Serial.println("YOU REACHED THE POSITION");
-  //               write_freqs(0, 0);
-  //               startWaitTime = micros();
-  //               integralErrorX = 0;
-  //               integralErrorY = 0;
-  //             }
-  //             if (command == 'L') {
-  //               if ((axes[0].piezoPosition - step_size_state) > 0){
-  //                 reached_pos = false;
-  //                 targetX_open = axes[0].piezoPosition*countsToMicrons - step_size_state;
-  //                 targetY_open = axes[1].piezoPosition*countsToMicrons;
-  //               }
-  //             } 
-  //             else if (command == 'R') {
-  //               if ((axes[0].piezoPosition + step_size_state) < 25000/countsToMicrons){
-  //                 reached_pos = false;
-  //                 targetX_open = axes[0].piezoPosition*countsToMicrons + step_size_state;
-  //                 targetY_open = axes[1].piezoPosition*countsToMicrons;
-  //               }
-  //             }
-  //             else if (command == 'U') {
-  //               if ((axes[1].piezoPosition + step_size_state) < 25000/countsToMicrons){
-  //                 reached_pos = false;
-  //                 targetY_open = axes[1].piezoPosition*countsToMicrons + step_size_state;
-  //                 targetX_open = axes[0].piezoPosition*countsToMicrons;
-  //               }
-  //             } 
-  //             else if (command == 'D') {
-  //               if ((axes[1].piezoPosition - step_size_state) > 0){
-  //                 reached_pos = false;
-  //                 targetY_open = axes[1].piezoPosition*countsToMicrons - step_size_state;
-  //                 targetX_open = axes[0].piezoPosition*countsToMicrons;
-  //               }              
-  //             }
-  //           }
-  //           else if (step_size_state == 0){
-  //             if (command == 'S') {
-  //               write_freqs(0, 0);
-  //             }
-  //             else if (command == 'L') {
-  //               write_freqs(-700, 0); 
-  //             } 
-  //             else if (command == 'R') {
-  //               write_freqs(700, 0); 
-  //             }
-  //             else if (command == 'U') {
-  //               write_freqs(0, 700);
-  //             } 
-  //             else if (command == 'D') {
-  //               write_freqs(0, -700);
-  //             }
-  //           }
-  //         }
-  //         delay(10); // small delay to prevent overload
-  //       }
-  //       break;
-  //     }
-
-
     case WAIT:
     {
       if (micros() - startWaitTime > WAIT_TIME) {  // enter WAIT after a certain amount of time
@@ -757,14 +704,6 @@ void loop() {
           state = MOVE;
           
           // Serial.println("State transition from CALIBRATE to MOVE");
-        }
-        if (old_state == OPEN){
-          while(1);
-          // Serial.println("STOP at OPEN");
-        }
-        if (old_state == READ) {
-          state = MOVE;
-          // Serial.println("State transition from READ to MOVE");
         }
         if (old_state == MOVE) {
           integralErrorX = 0;
