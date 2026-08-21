@@ -30,5 +30,4 @@ Please note you will need to attach heatsinks to the amplifiers to maintain opti
 
 This repository also contains fabrication files that can directly uploaded to a PCB manufacturer (located in [the electronics folder](https://github.com/bwnzhng/Open-Nano/tree/main/electronics))
 
-<img src="images/nano-core.png" alt="Nano-core electronics" width="300">
-<img src="images/sensor_head.png" alt="Sensor head electronics" width="300">
+<img src="images/nano-core.png" alt="Nano-core electronics" width="300"> <img src="images/sensor_head.png" alt="Sensor head electronics" width="300">
