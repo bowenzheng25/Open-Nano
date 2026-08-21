@@ -21,7 +21,7 @@ The CAD files are produced in Fusion360. You can get free access through the edu
 
 Otherwise, engineering drawings are attached for you to reproduce the part in your choice of CAD software as the designs are relatively straightforward.
 
-![nanopositioner](images/nanopositioner.png)
+![nanopositioner](images/nanopositioner.png | width=100)
 
 ## Electronics
 
@@ -31,6 +31,5 @@ Please note you will need to attach heatsinks to the amplifiers to maintain opti
 
 This repository also contains fabrication files that can directly uploaded to a PCB manufacturer (located in [the electronics folder](https://github.com/bwnzhng/Open-Nano/tree/main/electronics))
 
-![electronics_nano-core](images/nano-core.png)
-![electronics_sensor_head](images/sensor_head.png)
+![electronics_nano-core](images/nano-core.png | width=100) ![electronics_sensor_head](images/sensor_head.png | width=100)
 
