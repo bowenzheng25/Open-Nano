@@ -21,8 +21,7 @@ The CAD files are produced in Fusion360. You can get free access through the edu
 
 Otherwise, engineering drawings are attached for you to reproduce the part in your choice of CAD software as the designs are relatively straightforward.
 
-![nanopositioner](images/nanopositioner.png | width=100)
-
+<img src="images/nanopositioner.png" alt="Nanopositioner" width="100">
 ## Electronics
 
 The PCB schematics are designed in KICAD. No SMD soldering is required since through hole electronic components are used for easier hands-on assembly.
